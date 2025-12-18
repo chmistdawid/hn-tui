@@ -1,0 +1,9 @@
+hn-tui
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+.DS_Store
