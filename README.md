@@ -14,7 +14,7 @@ A terminal user interface for browsing Hacker News built with Go and tview.
 ## Installation
 
 ```bash
-go install github.com/chmistdawid/hn-tui@latest
+go install github.com/chmistdawid/hn-tui@0.0.1
 ```
 
 Or clone and build:
@@ -22,7 +22,7 @@ Or clone and build:
 ```bash
 git clone https://github.com/chmistdawid/hn-tui.git
 cd hn-tui
-go build -o hn-tui ./cmd/hn-tui
+go build -o hn-tui .
 ```
 
 ## Usage
@@ -44,8 +44,7 @@ Run the application:
 
 ```
 hn-tui/
-├── cmd/
-│   └── main.go           # Application entry point
+├── main.go               # Application entry point
 ├── internal/
 │   ├── api/
 │   │   └── client.go     # Hacker News API client
