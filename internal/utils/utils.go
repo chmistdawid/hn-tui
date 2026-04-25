@@ -10,19 +10,22 @@ import (
 	"time"
 )
 
+var (
+	htmlTagRe   = regexp.MustCompile(`<[^>]*>`)
+	pOpenRe     = regexp.MustCompile(`(?i)<p>`)
+	pCloseRe    = regexp.MustCompile(`(?i)</p>`)
+	brRe        = regexp.MustCompile(`(?i)<br\s*/?>`)
+	whitespaceRe = regexp.MustCompile(`\s+`)
+)
+
 func StripHTML(s string) string {
-	re := regexp.MustCompile(`<[^>]*>`)
-	s = re.ReplaceAllString(s, "")
-
+	s = htmlTagRe.ReplaceAllString(s, "")
 	s = html.UnescapeString(s)
-
-	s = regexp.MustCompile(`(?i)<p>`).ReplaceAllString(s, "\n")
-	s = regexp.MustCompile(`(?i)</p>`).ReplaceAllString(s, "")
-
-	s = regexp.MustCompile(`(?i)<br\s*/?>`).ReplaceAllString(s, " ")
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	s = pOpenRe.ReplaceAllString(s, "\n")
+	s = pCloseRe.ReplaceAllString(s, "")
+	s = brRe.ReplaceAllString(s, " ")
+	s = whitespaceRe.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
-
 	return s
 }
 

@@ -13,18 +13,19 @@ import (
 )
 
 type appState struct {
-	app         *tview.Application
-	posts       []models.Post
-	feed        string
-	offset      int
-	pageSize    int
-	totalPosts  int
-	loadingMore bool
-	cache       map[int][]models.Comment
-	cacheMu     sync.RWMutex
-	list        *tview.List
-	detailView  *tview.TextView
-	statusBar   *tview.TextView
+	app            *tview.Application
+	posts          []models.Post
+	feed           string
+	offset         int
+	pageSize       int
+	totalPosts     int
+	loadingMore    bool
+	selectedPostID int
+	cache          map[int][]models.Comment
+	cacheMu        sync.RWMutex
+	list           *tview.List
+	detailView     *tview.TextView
+	statusBar      *tview.TextView
 }
 
 func SetupMainUI(app *tview.Application, posts []models.Post, total int) {
@@ -125,6 +126,7 @@ func (s *appState) onSelectionChanged(index int, mainText, secondaryText string,
 		return
 	}
 	post := s.posts[index]
+	s.selectedPostID = post.ID
 
 	if cached, ok := s.getCachedComments(post.ID); ok {
 		s.renderDetailLoading(post)
@@ -134,20 +136,24 @@ func (s *appState) onSelectionChanged(index int, mainText, secondaryText string,
 
 	s.renderDetailLoading(post)
 
-	go func(p models.Post) {
+	go func(p models.Post, selectedID int) {
 		comments, err := api.FetchTopComments(p, 5)
 		if err != nil {
 			log.Printf("Failed to fetch comments: %v", err)
 			s.app.QueueUpdateDraw(func() {
-				s.renderDetailError(p, err)
+				if s.selectedPostID == selectedID {
+					s.renderDetailError(p, err)
+				}
 			})
 			return
 		}
 		s.setCachedComments(p.ID, comments)
 		s.app.QueueUpdateDraw(func() {
-			s.renderDetailComments(p, comments)
+			if s.selectedPostID == selectedID {
+				s.renderDetailComments(p, comments)
+			}
 		})
-	}(post)
+	}(post, post.ID)
 }
 
 func (s *appState) renderDetailLoading(post models.Post) {
