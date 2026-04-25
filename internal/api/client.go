@@ -52,16 +52,24 @@ func FetchPost(postID string) (*models.Post, error) {
 	return &post, nil
 }
 
-func FetchPosts(feed string, limit int) ([]models.Post, error) {
+func FetchPosts(feed string, offset, limit int) ([]models.Post, int, error) {
 	var postIDs []int
 	url := fmt.Sprintf("%s/%s.json", baseURL, feed)
 	if err := fetchJSON(url, &postIDs); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	if limit > 0 && limit < len(postIDs) {
-		postIDs = postIDs[:limit]
+	total := len(postIDs)
+
+	if offset >= total {
+		return []models.Post{}, total, nil
 	}
+
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	postIDs = postIDs[offset:end]
 
 	postList := make([]models.Post, len(postIDs))
 	var wg sync.WaitGroup
@@ -89,10 +97,10 @@ func FetchPosts(feed string, limit int) ([]models.Post, error) {
 	close(errors)
 
 	if len(errors) > 0 {
-		return nil, <-errors
+		return nil, total, <-errors
 	}
 
-	return postList, nil
+	return postList, total, nil
 }
 
 func FetchComment(commentID int) (*models.Comment, error) {

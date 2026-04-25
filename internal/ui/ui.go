@@ -13,22 +13,29 @@ import (
 )
 
 type appState struct {
-	app        *tview.Application
-	posts      []models.Post
-	feed       string
-	cache      map[int][]models.Comment
-	cacheMu    sync.RWMutex
-	list       *tview.List
-	detailView *tview.TextView
-	statusBar  *tview.TextView
+	app         *tview.Application
+	posts       []models.Post
+	feed        string
+	offset      int
+	pageSize    int
+	totalPosts  int
+	loadingMore bool
+	cache       map[int][]models.Comment
+	cacheMu     sync.RWMutex
+	list        *tview.List
+	detailView  *tview.TextView
+	statusBar   *tview.TextView
 }
 
-func SetupMainUI(app *tview.Application, posts []models.Post) {
+func SetupMainUI(app *tview.Application, posts []models.Post, total int) {
 	state := &appState{
-		app:   app,
-		posts: posts,
-		feed:  api.FeedTop,
-		cache: make(map[int][]models.Comment),
+		app:        app,
+		posts:      posts,
+		feed:       api.FeedTop,
+		offset:     len(posts),
+		pageSize:   30,
+		totalPosts: total,
+		cache:      make(map[int][]models.Comment),
 	}
 
 	state.list = tview.NewList()
@@ -43,6 +50,7 @@ func SetupMainUI(app *tview.Application, posts []models.Post) {
 	state.list.SetSelectedBackgroundColor(tcell.ColorDarkCyan)
 	state.list.SetHighlightFullLine(true)
 	state.list.ShowSecondaryText(true)
+	state.list.SetWrapAround(false)
 
 	state.detailView = tview.NewTextView().
 		SetDynamicColors(true).
@@ -67,8 +75,7 @@ func SetupMainUI(app *tview.Application, posts []models.Post) {
 		state.list.SetCurrentItem(0)
 	}
 
-	helpText := "[yellow]o[white]/[yellow]Enter[white]: Open  |  [yellow]h[white]: HN comments  |  [yellow]r[white]: Refresh  |  [yellow]1-6[white]: Feed  |  [yellow]↑↓[white]: Navigate  |  [yellow]q[white]/[yellow]Esc[white]: Quit"
-	state.statusBar.SetText(helpText)
+	state.updateStatusBar()
 
 	mainContent := tview.NewFlex().
 		AddItem(state.list, 0, 2, true).
@@ -92,7 +99,28 @@ func (s *appState) populateList() {
 	}
 }
 
+func (s *appState) appendPosts(posts []models.Post) {
+	start := len(s.posts)
+	s.posts = append(s.posts, posts...)
+	for i, post := range posts {
+		idx := start + i
+		title := fmt.Sprintf("[white::b]%d. [yellow]▲ %d [white]%s", idx+1, post.Score, post.Title)
+		ago := utils.FormatTimeAgo(post.Time)
+		secondary := fmt.Sprintf("[gray]by [::i]%s[gray:-] | [dodgerblue]%d comments[gray] | %s", post.Author, post.Comments, ago)
+		s.list.AddItem(title, secondary, 0, nil)
+	}
+}
+
 func (s *appState) onSelectionChanged(index int, mainText, secondaryText string, shortcut rune) {
+	// Preemptively load more when approaching the end (last 3 items)
+	threshold := len(s.posts) - 3
+	if threshold < 0 {
+		threshold = 0
+	}
+	if index >= threshold && !s.loadingMore && s.offset < s.totalPosts {
+		s.loadMore()
+	}
+
 	if index < 0 || index >= len(s.posts) {
 		return
 	}
@@ -176,6 +204,18 @@ func (s *appState) detailHeader(post models.Post) string {
 
 func (s *appState) setupInputCapture() {
 	s.list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Block navigation while loading more to prevent race conditions
+		if s.loadingMore {
+			switch event.Key() {
+			case tcell.KeyUp, tcell.KeyDown, tcell.KeyPgUp, tcell.KeyPgDn, tcell.KeyHome, tcell.KeyEnd:
+				return nil
+			}
+			switch event.Rune() {
+			case 'n':
+				return nil
+			}
+		}
+
 		switch event.Rune() {
 		case 'q':
 			s.app.Stop()
@@ -188,6 +228,9 @@ func (s *appState) setupInputCapture() {
 			return nil
 		case 'r':
 			s.refresh()
+			return nil
+		case 'n':
+			s.loadMore()
 			return nil
 		case '1':
 			s.switchFeed(api.FeedTop)
@@ -256,37 +299,85 @@ func (s *appState) openCurrentHN() {
 }
 
 func (s *appState) refresh() {
+	s.offset = 0
 	s.clearCache()
-	go s.loadFeed(s.feed)
+	go s.loadFeed(s.feed, 0)
 }
 
 func (s *appState) switchFeed(feed string) {
 	if feed == s.feed {
 		return
 	}
+	s.offset = 0
 	s.clearCache()
 	s.feed = feed
-	go s.loadFeed(feed)
+	go s.loadFeed(feed, 0)
 }
 
-func (s *appState) loadFeed(feed string) {
+func (s *appState) loadFeed(feed string, offset int) {
 	s.app.QueueUpdateDraw(func() {
 		s.list.SetTitle(" ⏳ Loading... ")
 	})
-	posts, err := api.FetchPosts(feed, 30)
+	posts, total, err := api.FetchPosts(feed, offset, s.pageSize)
 	s.app.QueueUpdateDraw(func() {
 		if err != nil {
 			s.detailView.SetText(fmt.Sprintf("[red]Error loading feed: %v", err))
-			s.list.SetTitle(" 🔥 Hacker News ")
+			s.list.SetTitle(feedTitle(feed))
 			return
 		}
 		s.posts = posts
+		s.offset = len(posts)
+		s.totalPosts = total
 		s.populateList()
 		if len(posts) > 0 {
 			s.list.SetCurrentItem(0)
 		}
 		s.list.SetTitle(feedTitle(feed))
+		s.updateStatusBar()
 	})
+}
+
+func (s *appState) loadMore() {
+	if s.loadingMore || s.offset >= s.totalPosts {
+		return
+	}
+	s.loadingMore = true
+	s.updateStatusBar()
+	go func() {
+		posts, total, err := api.FetchPosts(s.feed, s.offset, s.pageSize)
+		s.app.QueueUpdateDraw(func() {
+			s.loadingMore = false
+			if err != nil {
+				s.updateStatusBar()
+				return
+			}
+			if len(posts) == 0 {
+				s.totalPosts = total
+				s.updateStatusBar()
+				return
+			}
+			s.appendPosts(posts)
+			s.offset += len(posts)
+			s.totalPosts = total
+			s.updateStatusBar()
+		})
+	}()
+}
+
+func (s *appState) updateStatusBar() {
+	var text string
+	if s.loadingMore {
+		text = fmt.Sprintf(
+			"[yellow]⏳ Loading more stories... (%d/%d)  |  [yellow]q[white]/[yellow]Esc[white]: Quit",
+			s.offset, s.totalPosts,
+		)
+	} else {
+		text = fmt.Sprintf(
+			"[yellow]o[white]/[yellow]Enter[white]: Open  |  [yellow]h[white]: HN  |  [yellow]n[white]: Next (%d/%d)  |  [yellow]r[white]: Refresh  |  [yellow]1-6[white]: Feed  |  [yellow]↑↓[white]: Nav  |  [yellow]q[white]/[yellow]Esc[white]: Quit",
+			s.offset, s.totalPosts,
+		)
+	}
+	s.statusBar.SetText(text)
 }
 
 func (s *appState) getCachedComments(postID int) ([]models.Comment, bool) {

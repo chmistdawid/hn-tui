@@ -14,14 +14,14 @@ func main() {
 	ui.ShowLoadingScreen(app)
 
 	go func() {
-		posts, err := api.FetchPosts(api.FeedTop, 30)
+		posts, total, err := api.FetchPosts(api.FeedTop, 0, 30)
 		if err != nil {
 			app.Stop()
 			log.Fatalf("Could not download HN posts: %v", err)
 		}
 
 		app.QueueUpdateDraw(func() {
-			ui.SetupMainUI(app, posts)
+			ui.SetupMainUI(app, posts, total)
 		})
 	}()
 
