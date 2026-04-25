@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/chmistdawid/hn-tui/internal/api"
@@ -14,7 +15,7 @@ func main() {
 	ui.ShowLoadingScreen(app)
 
 	go func() {
-		posts, total, err := api.FetchPosts(api.FeedTop, 0, 30)
+		posts, total, err := api.FetchPosts(context.Background(), api.FeedTop, 0, 30)
 		if err != nil {
 			app.Stop()
 			log.Fatalf("Could not download HN posts: %v", err)
