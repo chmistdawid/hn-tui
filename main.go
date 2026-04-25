@@ -14,7 +14,7 @@ func main() {
 	ui.ShowLoadingScreen(app)
 
 	go func() {
-		posts, err := api.FetchTopPosts(30)
+		posts, err := api.FetchPosts(api.FeedTop, 30)
 		if err != nil {
 			app.Stop()
 			log.Fatalf("Could not download HN posts: %v", err)

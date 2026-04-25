@@ -6,49 +6,56 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/chmistdawid/hn-tui/internal/models"
 )
 
 const baseURL = "https://hacker-news.firebaseio.com/v0"
 
-func FetchPost(postID string) (*models.Post, error) {
-	url := fmt.Sprintf("%s/item/%s.json", baseURL, postID)
-	resp, err := http.Get(url)
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+const (
+	FeedTop  = "topstories"
+	FeedNew  = "newstories"
+	FeedBest = "beststories"
+	FeedAsk  = "askstories"
+	FeedShow = "showstories"
+	FeedJob  = "jobstories"
+)
+
+func fetchJSON(url string, target interface{}) error {
+	resp, err := httpClient.Get(url)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
+	return json.Unmarshal(body, target)
+}
+
+func FetchPost(postID string) (*models.Post, error) {
 	var post models.Post
-	err = json.Unmarshal(body, &post)
-	if err != nil {
+	url := fmt.Sprintf("%s/item/%s.json", baseURL, postID)
+	if err := fetchJSON(url, &post); err != nil {
 		return nil, err
 	}
-
 	return &post, nil
 }
 
-func FetchTopPosts(limit int) ([]models.Post, error) {
-	resp, err := http.Get(fmt.Sprintf("%s/topstories.json", baseURL))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
+func FetchPosts(feed string, limit int) ([]models.Post, error) {
 	var postIDs []int
-	err = json.Unmarshal(body, &postIDs)
-	if err != nil {
+	url := fmt.Sprintf("%s/%s.json", baseURL, feed)
+	if err := fetchJSON(url, &postIDs); err != nil {
 		return nil, err
 	}
 
@@ -89,24 +96,11 @@ func FetchTopPosts(limit int) ([]models.Post, error) {
 }
 
 func FetchComment(commentID int) (*models.Comment, error) {
-	url := fmt.Sprintf("%s/item/%d.json", baseURL, commentID)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
 	var comment models.Comment
-	err = json.Unmarshal(body, &comment)
-	if err != nil {
+	url := fmt.Sprintf("%s/item/%d.json", baseURL, commentID)
+	if err := fetchJSON(url, &comment); err != nil {
 		return nil, err
 	}
-
 	return &comment, nil
 }
 
@@ -120,14 +114,19 @@ func FetchTopComments(post models.Post, limit int) ([]models.Comment, error) {
 		kidIDs = kidIDs[:limit]
 	}
 
-	comments := make([]models.Comment, 0)
+	comments := make([]models.Comment, 0, len(kidIDs))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	semaphore := make(chan struct{}, 10)
+
 	for _, kidID := range kidIDs {
 		wg.Add(1)
+		semaphore <- struct{}{}
 		go func(id int) {
 			defer wg.Done()
+			defer func() { <-semaphore }()
+
 			comment, err := FetchComment(id)
 			if err != nil || comment.Deleted || comment.Dead {
 				return
