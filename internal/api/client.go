@@ -73,8 +73,6 @@ func FetchPosts(feed string, offset, limit int) ([]models.Post, int, error) {
 
 	postList := make([]models.Post, len(postIDs))
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	errors := make(chan error, len(postIDs))
 
 	for i, id := range postIDs {
 		wg.Add(1)
@@ -83,24 +81,27 @@ func FetchPosts(feed string, offset, limit int) ([]models.Post, int, error) {
 
 			post, err := FetchPost(fmt.Sprintf("%d", postID))
 			if err != nil {
-				errors <- err
 				return
 			}
 
-			mu.Lock()
 			postList[index] = *post
-			mu.Unlock()
 		}(i, id)
 	}
 
 	wg.Wait()
-	close(errors)
 
-	if len(errors) > 0 {
-		return nil, total, <-errors
+	var result []models.Post
+	for _, p := range postList {
+		if p.ID != 0 {
+			result = append(result, p)
+		}
 	}
 
-	return postList, total, nil
+	if len(result) == 0 {
+		return nil, total, fmt.Errorf("all %d posts failed to load", len(postIDs))
+	}
+
+	return result, total, nil
 }
 
 func FetchComment(commentID int) (*models.Comment, error) {
