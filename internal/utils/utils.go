@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	htmlTagRe   = regexp.MustCompile(`<[^>]*>`)
-	pOpenRe     = regexp.MustCompile(`(?i)<p>`)
-	pCloseRe    = regexp.MustCompile(`(?i)</p>`)
-	brRe        = regexp.MustCompile(`(?i)<br\s*/?>`)
+	htmlTagRe    = regexp.MustCompile(`<[^>]*>`)
+	pOpenRe      = regexp.MustCompile(`(?i)<p>`)
+	pCloseRe     = regexp.MustCompile(`(?i)</p>`)
+	brRe         = regexp.MustCompile(`(?i)<br\s*/?>`)
 	whitespaceRe = regexp.MustCompile(`\s+`)
 )
 
