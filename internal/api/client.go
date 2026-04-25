@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,8 +25,12 @@ const (
 	FeedJob  = "jobstories"
 )
 
-func fetchJSON(url string, target interface{}) error {
-	resp, err := httpClient.Get(url)
+func fetchJSON(ctx context.Context, url string, target interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -43,19 +48,19 @@ func fetchJSON(url string, target interface{}) error {
 	return json.Unmarshal(body, target)
 }
 
-func FetchPost(postID string) (*models.Post, error) {
+func FetchPost(ctx context.Context, postID string) (*models.Post, error) {
 	var post models.Post
 	url := fmt.Sprintf("%s/item/%s.json", baseURL, postID)
-	if err := fetchJSON(url, &post); err != nil {
+	if err := fetchJSON(ctx, url, &post); err != nil {
 		return nil, err
 	}
 	return &post, nil
 }
 
-func FetchPosts(feed string, offset, limit int) ([]models.Post, int, error) {
+func FetchPosts(ctx context.Context, feed string, offset, limit int) ([]models.Post, int, error) {
 	var postIDs []int
 	url := fmt.Sprintf("%s/%s.json", baseURL, feed)
-	if err := fetchJSON(url, &postIDs); err != nil {
+	if err := fetchJSON(ctx, url, &postIDs); err != nil {
 		return nil, 0, err
 	}
 
@@ -79,7 +84,7 @@ func FetchPosts(feed string, offset, limit int) ([]models.Post, int, error) {
 		go func(index int, postID int) {
 			defer wg.Done()
 
-			post, err := FetchPost(fmt.Sprintf("%d", postID))
+			post, err := FetchPost(ctx, fmt.Sprintf("%d", postID))
 			if err != nil {
 				return
 			}
@@ -104,16 +109,16 @@ func FetchPosts(feed string, offset, limit int) ([]models.Post, int, error) {
 	return result, total, nil
 }
 
-func FetchComment(commentID int) (*models.Comment, error) {
+func FetchComment(ctx context.Context, commentID int) (*models.Comment, error) {
 	var comment models.Comment
 	url := fmt.Sprintf("%s/item/%d.json", baseURL, commentID)
-	if err := fetchJSON(url, &comment); err != nil {
+	if err := fetchJSON(ctx, url, &comment); err != nil {
 		return nil, err
 	}
 	return &comment, nil
 }
 
-func FetchTopComments(post models.Post, limit int) ([]models.Comment, error) {
+func FetchTopComments(ctx context.Context, post models.Post, limit int) ([]models.Comment, error) {
 	if len(post.Kids) == 0 {
 		return []models.Comment{}, nil
 	}
@@ -123,29 +128,34 @@ func FetchTopComments(post models.Post, limit int) ([]models.Comment, error) {
 		kidIDs = kidIDs[:limit]
 	}
 
-	comments := make([]models.Comment, 0, len(kidIDs))
-	var mu sync.Mutex
+	comments := make([]models.Comment, len(kidIDs))
 	var wg sync.WaitGroup
 
 	semaphore := make(chan struct{}, 10)
 
-	for _, kidID := range kidIDs {
+	for i, kidID := range kidIDs {
 		wg.Add(1)
 		semaphore <- struct{}{}
-		go func(id int) {
+		go func(index int, id int) {
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
-			comment, err := FetchComment(id)
+			comment, err := FetchComment(ctx, id)
 			if err != nil || comment.Deleted || comment.Dead {
 				return
 			}
-			mu.Lock()
-			comments = append(comments, *comment)
-			mu.Unlock()
-		}(kidID)
+			comments[index] = *comment
+		}(i, kidID)
 	}
 
 	wg.Wait()
-	return comments, nil
+
+	var result []models.Comment
+	for _, c := range comments {
+		if c.ID != 0 {
+			result = append(result, c)
+		}
+	}
+
+	return result, nil
 }

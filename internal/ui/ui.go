@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -21,6 +22,7 @@ type appState struct {
 	totalPosts     int
 	loadingMore    bool
 	selectedPostID int
+	cancelFetch    func()
 	cache          map[int][]models.Comment
 	cacheMu        sync.RWMutex
 	list           *tview.List
@@ -136,9 +138,20 @@ func (s *appState) onSelectionChanged(index int, mainText, secondaryText string,
 
 	s.renderDetailLoading(post)
 
-	go func(p models.Post, selectedID int) {
-		comments, err := api.FetchTopComments(p, 5)
+	if s.cancelFetch != nil {
+		s.cancelFetch()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancelFetch = cancel
+
+	go func(p models.Post, selectedID int, fetchCtx context.Context) {
+		defer cancel()
+
+		comments, err := api.FetchTopComments(fetchCtx, p, 5)
 		if err != nil {
+			if fetchCtx.Err() != nil {
+				return
+			}
 			log.Printf("Failed to fetch comments: %v", err)
 			s.app.QueueUpdateDraw(func() {
 				if s.selectedPostID == selectedID {
@@ -153,7 +166,7 @@ func (s *appState) onSelectionChanged(index int, mainText, secondaryText string,
 				s.renderDetailComments(p, comments)
 			}
 		})
-	}(post, post.ID)
+	}(post, post.ID, ctx)
 }
 
 func (s *appState) renderDetailLoading(post models.Post) {
@@ -324,7 +337,7 @@ func (s *appState) loadFeed(feed string, offset int) {
 	s.app.QueueUpdateDraw(func() {
 		s.list.SetTitle(" ⏳ Loading... ")
 	})
-	posts, total, err := api.FetchPosts(feed, offset, s.pageSize)
+	posts, total, err := api.FetchPosts(context.Background(), feed, offset, s.pageSize)
 	s.app.QueueUpdateDraw(func() {
 		if err != nil {
 			s.detailView.SetText(fmt.Sprintf("[red]Error loading feed: %v", err))
@@ -350,7 +363,7 @@ func (s *appState) loadMore() {
 	s.loadingMore = true
 	s.updateStatusBar()
 	go func() {
-		posts, total, err := api.FetchPosts(s.feed, s.offset, s.pageSize)
+		posts, total, err := api.FetchPosts(context.Background(), s.feed, s.offset, s.pageSize)
 		s.app.QueueUpdateDraw(func() {
 			s.loadingMore = false
 			if err != nil {
