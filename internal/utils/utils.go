@@ -19,11 +19,11 @@ var (
 )
 
 func StripHTML(s string) string {
-	s = htmlTagRe.ReplaceAllString(s, "")
-	s = html.UnescapeString(s)
 	s = pOpenRe.ReplaceAllString(s, "\n")
 	s = pCloseRe.ReplaceAllString(s, "")
 	s = brRe.ReplaceAllString(s, " ")
+	s = htmlTagRe.ReplaceAllString(s, "")
+	s = html.UnescapeString(s)
 	s = whitespaceRe.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
 	return s
