@@ -30,7 +30,7 @@ func TestStripHTML(t *testing.T) {
 		{
 			name:     "br tags",
 			input:    "Line 1<br>Line 2<br/>Line 3",
-			expected: "Line 1Line 2Line 3",
+			expected: "Line 1 Line 2 Line 3",
 		},
 		{
 			name:     "html entities",
